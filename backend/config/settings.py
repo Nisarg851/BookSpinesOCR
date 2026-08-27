@@ -112,3 +112,8 @@ VLM_TIMEOUT_S = 180
 # Cap VLM reads per uploaded photo (one cloud agent per crop is slow/pricey).
 VLM_MAX_SPINES_PER_PHOTO = 8
 
+# Fuzzy catalog matching (see books/matching.py for the confidence formula).
+MATCH_AUTO_ACCEPT_THRESHOLD = 0.88  # ≥ this → AUTO_ACCEPTED (unless ambiguous)
+MATCH_REVIEW_FLOOR = 0.55  # ≥ floor → PENDING_REVIEW with a suggested match
+MATCH_AMBIGUITY_GAP = 0.08  # top − runner-up ≤ gap → surface ambiguity
+

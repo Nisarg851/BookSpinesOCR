@@ -3,3 +3,4 @@ djangorestframework==3.18.0
 django-cors-headers==4.9.0
 Pillow==12.3.0
 ultralytics==8.3.203
+rapidfuzz==3.14.1
