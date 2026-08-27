@@ -209,8 +209,14 @@ export default function App() {
         <View style={styles.results}>
           <Text style={styles.label}>Result</Text>
           <Text style={styles.mono}>
-            status={result.status} · detection_ms={result.detection_ms ?? "—"} ·
-            vlm_ms={result.vlm_ms ?? "—"} · spines={result.spines.length}
+            photo={result.photo_id ?? result.photo?.id ?? "—"} · spines=
+            {result.spines.length}
+          </Text>
+          <Text style={styles.mono}>
+            det={result.latency?.detection_ms ?? result.detection_ms ?? "—"}ms ·
+            vlm={result.latency?.vlm_ms ?? result.vlm_ms ?? "—"}ms · match=
+            {result.latency?.matching_ms ?? "—"}ms · total=
+            {result.latency?.total_ms ?? "—"}ms
           </Text>
           <Text>{result.message}</Text>
           {result.spines.map((spine) => (
@@ -238,6 +244,15 @@ export default function App() {
                 ) : (
                   <Text style={styles.hint}>VLM not run on this crop</Text>
                 )}
+                {spine.match ? (
+                  <Text style={styles.mono}>
+                    match={spine.match.status} · conf=
+                    {spine.match.confidence.toFixed(2)}
+                    {spine.match.catalog_book
+                      ? ` → ${spine.match.catalog_book.title}`
+                      : " → (no catalog hit)"}
+                  </Text>
+                ) : null}
                 <Text style={styles.mono}>
                   #{spine.id} · det={spine.confidence.toFixed(2)} ·{" "}
                   {spine.vlm_status}

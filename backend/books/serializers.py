@@ -24,37 +24,38 @@ class CatalogBookSerializer(serializers.ModelSerializer):
         ]
 
 
-class ShelfPhotoSerializer(serializers.ModelSerializer):
+class MatchResultSerializer(serializers.ModelSerializer):
+    catalog_book = CatalogBookSerializer(read_only=True)
+
     class Meta:
-        model = ShelfPhoto
+        model = MatchResult
         fields = [
             "id",
-            "uploaded_at",
-            "detection_ms",
-            "vlm_ms",
-            "matching_ms",
+            "catalog_book",
+            "confidence",
+            "status",
         ]
         read_only_fields = fields
 
 
 class DetectedSpineSerializer(serializers.ModelSerializer):
     crop_url = serializers.SerializerMethodField()
+    match = MatchResultSerializer(read_only=True)
 
     class Meta:
         model = DetectedSpine
         fields = [
             "id",
-            "photo",
             "x1",
             "y1",
             "x2",
             "y2",
             "confidence",
-            "crop",
             "crop_url",
             "vlm_status",
             "vlm_title",
             "vlm_author",
+            "match",
         ]
         read_only_fields = fields
 
@@ -68,19 +69,37 @@ class DetectedSpineSerializer(serializers.ModelSerializer):
         return url
 
 
-class MatchResultSerializer(serializers.ModelSerializer):
-    catalog_book = CatalogBookSerializer(read_only=True)
+class ShelfPhotoDetailSerializer(serializers.ModelSerializer):
+    spines = DetectedSpineSerializer(many=True, read_only=True)
+    latency = serializers.SerializerMethodField()
 
     class Meta:
-        model = MatchResult
+        model = ShelfPhoto
         fields = [
             "id",
-            "spine",
-            "catalog_book",
-            "confidence",
-            "status",
+            "uploaded_at",
+            "detection_ms",
+            "vlm_ms",
+            "matching_ms",
+            "latency",
+            "spines",
         ]
         read_only_fields = fields
+
+    def get_latency(self, obj: ShelfPhoto) -> dict:
+        detection = obj.detection_ms or 0
+        vlm = obj.vlm_ms or 0
+        matching = obj.matching_ms or 0
+        # Prefer wall-clock total from pipeline context when present.
+        total = self.context.get("total_ms")
+        if total is None:
+            total = detection + vlm + matching
+        return {
+            "detection_ms": obj.detection_ms,
+            "vlm_ms": obj.vlm_ms,
+            "matching_ms": obj.matching_ms,
+            "total_ms": total,
+        }
 
 
 class LibraryEntrySerializer(serializers.ModelSerializer):

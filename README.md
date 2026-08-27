@@ -6,7 +6,7 @@ This is a local-only take-home: Expo (React Native) client + Django REST API. No
 
 ## Status
 
-Local book detection + hosted spine reading are wired: Expo can capture / pick / URL-submit a photo, Django runs Ultralytics YOLOv8n (COCO, CPU), then Cursor Cloud Agents (`composer-2.5`) read title/author from crops (capped). The app shows crop thumbnails with the VLM title/author. Fuzzy catalog matching and review UI are not built yet.
+End-to-end API is wired: `POST /api/photos/` runs detect → VLM → match synchronously and returns spines with MatchResults + latency. Confirm/correct/discard and library list work. Expo shows titles, match status, and latency. A dedicated review-screen UX polish and fuller README tradeoffs remain.
 
 ## Stack (local vs hosted)
 
@@ -41,8 +41,10 @@ python manage.py detect_spines samples\bookshelf.jpg
 Endpoints:
 - `GET /api/health/`
 - `GET /api/catalog/`
-- `GET /api/library/`
-- `POST /api/detect/` — multipart `image` **or** JSON `{"url":"..."}` (original is not kept; crops are)
+- `POST /api/photos/` — multipart `image` **or** JSON `{"url":"..."}`; runs detect → VLM → match synchronously
+- `GET /api/photos/<id>/` — refetch photo + spines + matches + latency
+- `POST /api/spines/<id>/confirm/` — `{action: accept|correct|discard}`
+- `GET /api/library/` — confirmed LibraryEntry rows
 - `/admin/` — `python manage.py createsuperuser`
 
 ### Mobile (Expo)
