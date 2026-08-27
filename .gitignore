@@ -1,0 +1,45 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Django
+backend/db.sqlite3
+*.sqlite3
+
+# Secrets / local env
+.env
+.env.local
+mobile/.env
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Native / signing
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+mobile/ios/
+mobile/android/
+.kotlin/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

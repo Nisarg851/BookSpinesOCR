@@ -1,54 +1,69 @@
-# catalog.csv
+# Shelfie
 
-A catalog of approximately 130 realworld books.
+Photo of a bookshelf → structured personal library.
 
-## Fields
+This is a local-only take-home: Expo (React Native) client + Django REST API. No deployment.
 
-| Field       | Description                                                                 |
-|-------------|-------------------------------------------------------------------------------|
-| `id`        | Unique row identifier.                                                        |
-| `title`     | Title as it appears on that edition.                                          |
-| `author`    | Author name, in whatever form that edition uses.|
-| `alt_titles`| Known alternate title(s) for the same book — a different-language original, a US/UK retitle, or a short form. Blank when no alternate is known. |
-| `isbn13`    | 13-digit ISBN, where one exists. Blank for editions that predate ISBN standardization or otherwise lack one. |
-| `publisher` | Publisher of that specific edition.                                           |
-| `year`      | Publication year of that edition.                                             |
-| `edition`   | Edition label, e.g. "1st ed.", "Penguin Classics", "UK 1st ed."               |
+## Status
 
-## Stats
+Phase 0 scaffolding only. The app and API boot, and the client can reach `GET /api/health/`. Spine detection, VLM reads, catalog matching, and library UI are not built yet.
 
-- 130 rows total
-- 12 distinct titles appear twice each (24 rows) — see "Characteristics" below
-- 114/130 rows have an ISBN; 16 have none
-- 41/130 rows have `alt_titles` populated; the rest are blank
+## Stack (local vs hosted)
 
-## Characteristics
+| Piece | Where it runs |
+| --- | --- |
+| Spine detection (pretrained, CPU) | Local (not wired yet) |
+| Title/author read from spine crops | Hosted VLM (not wired yet; provider TBD) |
+| Catalog match + library | Local SQLite (not wired yet) |
 
-**Duplicate editions of the same book.** The same title/author pair appears twice
-with different `edition`, `year`, `isbn13`, or `publisher` — e.g. *Pride and
-Prejudice* (1813, T. Egerton, no ISBN) and *Pride and Prejudice* (2003, Penguin
-Classics, with ISBN).
+## Setup
 
-**Same book under a different title.** US/UK retitles and translations, linked via
-`alt_titles` rather than a shared `title`. E.g. *Harry Potter and the Philosopher's
-Stone* ↔ *...and the Sorcerer's Stone*; *Cien años de soledad* ↔ *One Hundred Years
-of Solitude*.
+### Backend
 
-**Different books that share a title.** Same `title`, unrelated `author`. E.g. two
-entries titled *Foundation* — one Isaac Asimov's science fiction novel, one Peter
-Ackroyd's history of England — and two entries titled *The Stranger*, by Albert
-Camus and Harlan Coben respectively.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+cd backend
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+```
 
-**Omnibus editions alongside individual volumes.** E.g. *The Lord of the Rings*
-(one-volume omnibus) appears as its own row alongside separate rows for *The
-Fellowship of the Ring*, *The Two Towers*, and *The Return of the King*.
+Health check: `http://127.0.0.1:8000/api/health/` → `{"status":"ok","service":"shelfie"}`
 
-**Titles that are substrings of other titles.** Short, generic titles (*It*, *Us*,
-*Kim*, *Room*) sit alongside longer titles that contain them (*A Room with a
-View*, *Circle of Friends*, *Gone with the Wind*).
+`0.0.0.0` is required so a physical phone on the same LAN can reach the API. Simulators can use localhost / `10.0.2.2`.
 
-**Author names in inconsistent formats.** Initials vs. full name (*J.K. Rowling*
-vs. *Rowling, J.K.*), accented vs. unaccented (*García Márquez* vs. *Garcia
-Marquez*, *Brontë* vs. *Bronte*), transliteration variants (*Dostoevsky* vs.
-*Dostoyevsky*, *Leo Tolstoy* vs. *Lev Tolstoy*), and pen names vs. legal names
-(*George Orwell* vs. *Eric Arthur Blair*).
+### Mobile (Expo)
+
+```powershell
+cd mobile
+npm install
+npx expo start
+```
+
+Then open in Expo Go, an iOS simulator, or an Android emulator.
+
+Default API URLs:
+
+- iOS simulator / Expo web: `http://127.0.0.1:8000`
+- Android emulator: `http://10.0.2.2:8000`
+
+On a **physical device**, localhost is the phone. Create `mobile/.env` (see `mobile/.env.example`) with your computer's LAN IP:
+
+```
+EXPO_PUBLIC_API_URL=http://192.168.x.x:8000
+```
+
+Restart Expo after changing `.env`.
+
+## Catalog
+
+`catalog.csv` currently has only the header row. Rows and deliberate ambiguities come in a later phase.
+
+## Measured latency / cost
+
+Not applicable yet (no detection or VLM calls).
+
+## What's unfinished
+
+Everything past scaffolding: detection, VLM, matching, review screen, library persistence, tests, photos, full README.
