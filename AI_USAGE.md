@@ -1,7 +1,3 @@
-# AI usage
-
-Short, honest note — not a transcript.
-
 ## Tools used while building
 
 | Tool | Role |
@@ -21,8 +17,3 @@ No other coding AIs were used as a separate workflow (no ChatGPT-web paste loop,
 
 Prompts for the product VLM live in `backend/books/vlm.py` (`SPINE_PROMPT`).
 
-## Keys / cost
-
-- Secrets only in gitignored repo-root `.env` (`OPENAI_API_KEY`, optional `CURSOR_API_KEY`)
-- Never commit real keys; rotate anything that was ever pasted into chat
-- Bench cost column = OpenAI usage tokens × published `gpt-4o-mini` list rates in `vlm.py`

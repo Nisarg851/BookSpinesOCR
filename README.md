@@ -2,8 +2,6 @@
 
 Photo of a bookshelf → structured personal library.
 
-Local take-home: **Expo (React Native / TypeScript)** client + **Django REST API** + **SQLite**. No auth, deploy, or CI required.
-
 ## Setup (clean clone)
 
 Prereqs: Python 3.11+, Node 20+, a phone with Expo Go (or a simulator).
