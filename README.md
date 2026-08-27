@@ -69,9 +69,15 @@ Sample photo `samples/bookshelf.jpg` (management command, CPU, YOLOv8n):
 | Detection (subsequent API smoke test) | ~3.9 s |
 | Boxes / crops | 47 |
 
-VLM (Cursor Cloud Agents, `composer-2.5`, no-repo): one cloud agent per crop. Per-call cost is plan-included (logged as `$0` until token meters are available). Cap: `VLM_MAX_SPINES_PER_PHOTO` (default 8) so a full shelf doesn't spawn dozens of agents.
+VLM (Cursor Cloud Agents, model `default` / Auto, no-repo). Measured on three real crops from `backend/media/crops/1/`:
 
-Requires `CURSOR_API_KEY` in repo-root `.env`, and **Cloud Agent storage enabled** in Cursor settings (otherwise the API returns `403 feature_unavailable`).
+| Crop | Title / author returned | `vlm_ms` |
+| --- | --- | --- |
+| `3.jpg` | Water for Elephants / Sara Gruen | ~63.5 s |
+| `10.jpg` | INTO THIN AIR / Jon Krakauer | ~65.4 s |
+| `24.jpg` | STATION ELEVEN / EMILY ST. JOHN MANDEL | ~65.5 s |
+
+Per-call cost logged as `$0` (Cursor plan / no token meter on this API). Cap: `VLM_MAX_SPINES_PER_PHOTO` (default 8). Requires `CURSOR_API_KEY` in repo-root `.env` and Cloud Agent storage enabled.
 
 Honest caveat: COCO `book` is not a spine segmenter — one detection may cover a cluster of spines.
 

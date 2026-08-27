@@ -105,9 +105,9 @@ SPINE_DETECTION_WEIGHTS_DIR = BASE_DIR / "models"
 
 # Hosted VLM via Cursor Cloud Agents API. Key: CURSOR_API_KEY / repo-root .env.
 VLM_PROVIDER = "cursor"
-VLM_MODEL = "composer-2.5"
+VLM_MODEL = "default"
 VLM_API_KEY_ENV = "CURSOR_API_KEY"
-# Cloud agent create + poll; spine OCR is usually well under this.
+# Cloud agent create may block until the first run finishes.
 VLM_TIMEOUT_S = 180
 # Cap VLM reads per uploaded photo (one cloud agent per crop is slow/pricey).
 VLM_MAX_SPINES_PER_PHOTO = 8

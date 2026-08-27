@@ -179,7 +179,8 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
             "model": {"id": settings.VLM_MODEL},
             "name": "shelfie-spine-read",
         },
-        timeout=60.0,
+        # Create can block until the first run finishes (~20–90s).
+        timeout=float(settings.VLM_TIMEOUT_S),
     )
     agent = created.get("agent") or {}
     run = created.get("run") or {}
@@ -188,19 +189,20 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
     if not agent_id or not run_id:
         raise RuntimeError(f"Unexpected create response: {created!r}")
 
+    # Create responses often omit `result` even when status is FINISHED — always GET.
     deadline = time.monotonic() + float(settings.VLM_TIMEOUT_S)
-    last: dict[str, Any] = run
+    last: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        status = (last.get("status") or "").upper()
-        if status in {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}:
-            break
-        time.sleep(1.5)
         last = _cursor_request(
             "GET",
             f"/agents/{agent_id}/runs/{run_id}",
             api_key,
-            timeout=30.0,
+            timeout=60.0,
         )
+        status = (last.get("status") or "").upper()
+        if status in {"FINISHED", "ERROR", "CANCELLED", "EXPIRED"}:
+            break
+        time.sleep(1.5)
     else:
         raise TimeoutError(
             f"Cursor run {run_id} did not finish within {settings.VLM_TIMEOUT_S}s"
