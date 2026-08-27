@@ -1,26 +1,28 @@
 # AI usage
 
-This take-home used AI assistance (Cursor) heavily for scaffolding, wiring, and iteration. Summary of model roles in the **product** itself:
+Short, honest note — not a transcript.
 
-## In-product models
+## Tools used while building
 
-| Role | Model / provider | Notes |
-| --- | --- | --- |
-| Book region detection | Ultralytics **YOLOv8n** (COCO pretrained, CPU) | No fine-tuning; weights downloaded locally on first run |
-| Spine title/author OCR | **OpenAI `gpt-4o-mini`** vision (primary) | `detail=low`; parallel reads (≤3); 429 retries |
-| Fallback spine read | **Cursor Cloud Agents** API | Used automatically if OpenAI fails / missing key; or `VLM_PROVIDER=cursor` |
-| Catalog fuzzy match | **rapidfuzz** (local, not an LLM) | Title/author scoring + auto-accept / review thresholds |
+| Tool | Role |
+| --- | --- |
+| **Cursor** (Agent / Composer in the IDE) | Most of the scaffolding and iteration: Django app layout, Expo screens, API wiring, matcher tests, README/bench command, debugging timeouts and provider switches |
+| **OpenAI `gpt-4o-mini` (vision)** | **In-product** spine title/author reader (primary VLM). Also the source of measured token usage for cost estimates |
+| **Cursor Cloud Agents API** | **In-product** automatic VLM fallback when OpenAI fails / key missing (or `VLM_PROVIDER=cursor`). Earlier in the project this was the primary reader before OpenAI was wired |
+| **Ultralytics YOLOv8n** | **In-product** local detector — pretrained COCO weights, no fine-tuning, not “prompted” |
 
-## Prompts
+No other coding AIs were used as a separate workflow (no ChatGPT-web paste loop, no Copilot-as-primary). Human decisions covered catalog ambiguity design, HITL flow, provider choice, and what to leave unfinished.
 
-Spine-read prompt lives in `backend/books/vlm.py` (`SPINE_PROMPT`): JSON-only `{title, author, confidence_note}`, no invented catalog matches.
+## Roughly where AI help showed up
 
-## Cost / keys
+- Backend: `detection.py`, `vlm.py`, `matching.py`, `pipeline.py`, DRF views/serializers, management commands (`bench_pipeline`, etc.)
+- Mobile: Capture / Review / Library screens, upload helpers, navigation
+- Docs: README structure and this file (numbers in the latency table are from a real `bench_pipeline` run, not invented by the model)
 
-- Keys live only in gitignored repo-root `.env` (`OPENAI_API_KEY`, optional `CURSOR_API_KEY`)  
-- Never commit real keys; rotate any key that was pasted into chat  
-- OpenAI usage is metered; Cursor fallback cost depends on your Cursor plan  
+Prompts for the product VLM live in `backend/books/vlm.py` (`SPINE_PROMPT`).
 
-## What AI did *not* replace
+## Keys / cost
 
-Human review of matches (accept / correct / discard), catalog ambiguity design, and architecture tradeoffs documented in `README.md`.
+- Secrets only in gitignored repo-root `.env` (`OPENAI_API_KEY`, optional `CURSOR_API_KEY`)
+- Never commit real keys; rotate anything that was ever pasted into chat
+- Bench cost column = OpenAI usage tokens × published `gpt-4o-mini` list rates in `vlm.py`

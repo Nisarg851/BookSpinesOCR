@@ -26,6 +26,10 @@ class PipelineResult:
     detection: DetectionResult
     spines: list[DetectedSpine]
     total_ms: int
+    vlm_calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    est_cost_usd: float = 0.0
 
 
 def _match_spines(photo: ShelfPhoto) -> int:
@@ -93,10 +97,18 @@ def process_photo_image(image_path: Path) -> PipelineResult:
     photo = ShelfPhoto.objects.create(detection_ms=detection.detection_ms)
 
     spines: list[DetectedSpine] = []
+    vlm_calls = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    est_cost_usd = 0.0
     if detection.status == "ok" and detection.boxes:
         spines = save_spines_for_photo(photo, image_path, detection.boxes)
         limit = int(settings.VLM_MAX_SPINES_PER_PHOTO)
-        read_spines_for_photo(photo, limit=limit)
+        reads = read_spines_for_photo(photo, limit=limit)
+        vlm_calls = len(reads)
+        prompt_tokens = sum(r.prompt_tokens for r in reads)
+        completion_tokens = sum(r.completion_tokens for r in reads)
+        est_cost_usd = sum(r.estimated_cost_usd for r in reads)
         _match_spines(photo)
         spines = list(
             photo.spines.select_related("match", "match__catalog_book").all()
@@ -113,6 +125,10 @@ def process_photo_image(image_path: Path) -> PipelineResult:
         detection=detection,
         spines=spines,
         total_ms=total_ms,
+        vlm_calls=vlm_calls,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        est_cost_usd=est_cost_usd,
     )
 
 
