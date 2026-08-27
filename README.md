@@ -6,14 +6,14 @@ This is a local-only take-home: Expo (React Native) client + Django REST API. No
 
 ## Status
 
-Local book detection is wired end-to-end: Expo can capture / pick / URL-submit a photo, Django runs Ultralytics YOLOv8n (COCO, CPU), and the app shows crop thumbnails + boxes. VLM reading, fuzzy matching, and review UI are not built yet.
+Local book detection + hosted spine reading are wired: Expo can capture / pick / URL-submit a photo, Django runs Ultralytics YOLOv8n (COCO, CPU), then Cursor Cloud Agents (`composer-2.5`) read title/author from crops (capped). The app shows crop thumbnails with the VLM title/author. Fuzzy catalog matching and review UI are not built yet.
 
 ## Stack (local vs hosted)
 
 | Piece | Where it runs |
 | --- | --- |
 | Spine/book detection (YOLOv8n, COCO pretrained, CPU) | Local |
-| Title/author read from spine crops | Hosted VLM (not wired yet; provider TBD) |
+| Title/author read from spine crops | Hosted — Cursor Cloud Agents (`composer-2.5`) |
 | Catalog match + library | Local SQLite (catalog loaded; matching not wired yet) |
 
 ## Setup
@@ -69,7 +69,9 @@ Sample photo `samples/bookshelf.jpg` (management command, CPU, YOLOv8n):
 | Detection (subsequent API smoke test) | ~3.9 s |
 | Boxes / crops | 47 |
 
-VLM cost: not applicable yet.
+VLM (Cursor Cloud Agents, `composer-2.5`, no-repo): one cloud agent per crop. Per-call cost is plan-included (logged as `$0` until token meters are available). Cap: `VLM_MAX_SPINES_PER_PHOTO` (default 8) so a full shelf doesn't spawn dozens of agents.
+
+Requires `CURSOR_API_KEY` in repo-root `.env`, and **Cloud Agent storage enabled** in Cursor settings (otherwise the API returns `403 feature_unavailable`).
 
 Honest caveat: COCO `book` is not a spine segmenter — one detection may cover a cluster of spines.
 

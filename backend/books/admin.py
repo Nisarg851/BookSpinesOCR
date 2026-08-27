@@ -46,7 +46,19 @@ class ShelfPhotoAdmin(admin.ModelAdmin):
 
 @admin.register(DetectedSpine)
 class DetectedSpineAdmin(admin.ModelAdmin):
-    list_display = ("id", "photo", "vlm_title", "vlm_author", "confidence", "x1", "y1", "x2", "y2")
+    list_display = (
+        "id",
+        "photo",
+        "vlm_status",
+        "vlm_title",
+        "vlm_author",
+        "confidence",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+    )
+    list_filter = ("vlm_status",)
     search_fields = ("vlm_title", "vlm_author")
     raw_id_fields = ("photo",)
 

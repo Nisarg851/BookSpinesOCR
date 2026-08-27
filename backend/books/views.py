@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, parser_classes
@@ -17,6 +18,7 @@ from .serializers import (
     LibraryEntrySerializer,
     ShelfPhotoSerializer,
 )
+from .vlm import read_spines_for_photo
 
 MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
 
@@ -72,11 +74,14 @@ def _download_url_to_temp(url: str) -> tuple[Path | None, str | None]:
     return Path(tmp.name), None
 
 
-def _detection_response(request, photo: ShelfPhoto, result, spines):
+def _detection_response(request, photo: ShelfPhoto, result, spines, *, vlm_reads=0):
+    photo.refresh_from_db()
     photo_data = ShelfPhotoSerializer(photo).data
     spine_data = DetectedSpineSerializer(
         spines, many=True, context={"request": request}
     ).data
+    readable = sum(1 for s in spines if s.vlm_status == "OK")
+    unreadable = sum(1 for s in spines if s.vlm_status == "UNREADABLE")
     actionable = {
         "ok": result.status == "ok",
         "zero_detections": result.status == "zero_detections",
@@ -84,18 +89,24 @@ def _detection_response(request, photo: ShelfPhoto, result, spines):
         "model_load_failed": result.status == "model_load_failed",
         "timeout": result.status == "timeout",
     }
+    message = result.message or (
+        f"Detected {len(spines)} book region(s)" if spines else "No book regions found"
+    )
+    if spines:
+        message = (
+            f"{message}; VLM read {vlm_reads} crop(s) "
+            f"({readable} ok, {unreadable} unreadable), "
+            f"vlm_ms={photo.vlm_ms}"
+        )
     return Response(
         {
             **actionable,
             "status": result.status,
-            "message": result.message
-            or (
-                f"Detected {len(spines)} book region(s)"
-                if spines
-                else "No book regions found"
-            ),
+            "message": message,
             "photo": photo_data,
             "detection_ms": photo.detection_ms,
+            "vlm_ms": photo.vlm_ms,
+            "vlm_reads": vlm_reads,
             "spines": spine_data,
         }
     )
@@ -155,14 +166,22 @@ def detect_books(request):
         photo = ShelfPhoto.objects.create(detection_ms=result.detection_ms)
 
         spines = []
+        vlm_reads = 0
         if result.status == "ok" and result.boxes:
             spines = save_spines_for_photo(photo, temp_path, result.boxes)
+            # Hosted VLM on crops (capped — Cursor agent-per-spine is slow).
+            limit = int(settings.VLM_MAX_SPINES_PER_PHOTO)
+            vlm_results = read_spines_for_photo(photo, limit=limit)
+            vlm_reads = len(vlm_results)
+            spines = list(photo.spines.all())
 
         http_status = status.HTTP_200_OK
         if result.status in {"unreadable_image", "model_load_failed", "timeout"}:
             http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
 
-        response = _detection_response(request, photo, result, spines)
+        response = _detection_response(
+            request, photo, result, spines, vlm_reads=vlm_reads
+        )
         response.status_code = http_status
         return response
     finally:

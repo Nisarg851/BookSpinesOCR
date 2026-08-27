@@ -10,6 +10,9 @@ export type DetectedSpine = {
   y2: number;
   confidence: number;
   crop_url: string | null;
+  vlm_status: "PENDING" | "OK" | "UNREADABLE";
+  vlm_title: string;
+  vlm_author: string;
 };
 
 export type DetectResponse = {
@@ -17,8 +20,14 @@ export type DetectResponse = {
   status: string;
   message: string;
   detection_ms: number | null;
+  vlm_ms: number | null;
+  vlm_reads?: number;
   spines: DetectedSpine[];
-  photo?: { id: number; detection_ms: number | null };
+  photo?: {
+    id: number;
+    detection_ms: number | null;
+    vlm_ms: number | null;
+  };
 };
 
 async function appendImage(

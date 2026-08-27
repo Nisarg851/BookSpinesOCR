@@ -39,6 +39,11 @@ class ShelfPhoto(models.Model):
 class DetectedSpine(models.Model):
     """One book spine found in a ShelfPhoto by the local detection model."""
 
+    class VlmStatus(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        OK = "OK", "OK"
+        UNREADABLE = "UNREADABLE", "Unreadable"
+
     photo = models.ForeignKey(
         ShelfPhoto,
         on_delete=models.CASCADE,
@@ -52,6 +57,11 @@ class DetectedSpine(models.Model):
     crop = models.ImageField(upload_to="crops/", blank=True)
     confidence = models.FloatField(default=0.0)
     # Filled later by the hosted VLM.
+    vlm_status = models.CharField(
+        max_length=16,
+        choices=VlmStatus.choices,
+        default=VlmStatus.PENDING,
+    )
     vlm_title = models.CharField(max_length=512, blank=True, default="")
     vlm_author = models.CharField(max_length=512, blank=True, default="")
     vlm_raw_response = models.TextField(blank=True, default="")

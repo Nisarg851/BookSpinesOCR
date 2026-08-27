@@ -52,6 +52,7 @@ class DetectedSpineSerializer(serializers.ModelSerializer):
             "confidence",
             "crop",
             "crop_url",
+            "vlm_status",
             "vlm_title",
             "vlm_author",
         ]

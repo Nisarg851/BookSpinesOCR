@@ -20,6 +20,7 @@ backend/models/
 .env
 .env.local
 mobile/.env
+backend/.env
 
 # Node / Expo
 node_modules/

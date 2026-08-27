@@ -189,7 +189,7 @@ export default function App() {
       {busy ? (
         <View style={styles.busyRow}>
           <ActivityIndicator />
-          <Text>Running local YOLO detection…</Text>
+          <Text>Detecting books + reading spine text…</Text>
         </View>
       ) : null}
 
@@ -210,7 +210,7 @@ export default function App() {
           <Text style={styles.label}>Result</Text>
           <Text style={styles.mono}>
             status={result.status} · detection_ms={result.detection_ms ?? "—"} ·
-            spines={result.spines.length}
+            vlm_ms={result.vlm_ms ?? "—"} · spines={result.spines.length}
           </Text>
           <Text>{result.message}</Text>
           {result.spines.map((spine) => (
@@ -224,13 +224,23 @@ export default function App() {
                 <View style={[styles.crop, styles.cropPlaceholder]} />
               )}
               <View style={styles.spineMeta}>
-                <Text style={styles.mono}>#{spine.id}</Text>
+                {spine.vlm_status === "OK" ? (
+                  <>
+                    <Text style={styles.bookTitle}>
+                      {spine.vlm_title || "Untitled"}
+                    </Text>
+                    <Text style={styles.bookAuthor}>
+                      {spine.vlm_author || "Unknown author"}
+                    </Text>
+                  </>
+                ) : spine.vlm_status === "UNREADABLE" ? (
+                  <Text style={styles.unreadable}>Couldn’t read this spine</Text>
+                ) : (
+                  <Text style={styles.hint}>VLM not run on this crop</Text>
+                )}
                 <Text style={styles.mono}>
-                  conf={spine.confidence.toFixed(3)}
-                </Text>
-                <Text style={styles.mono}>
-                  [{spine.x1.toFixed(0)}, {spine.y1.toFixed(0)}] → [
-                  {spine.x2.toFixed(0)}, {spine.y2.toFixed(0)}]
+                  #{spine.id} · det={spine.confidence.toFixed(2)} ·{" "}
+                  {spine.vlm_status}
                 </Text>
               </View>
             </View>
@@ -367,5 +377,19 @@ const styles = StyleSheet.create({
   spineMeta: {
     flex: 1,
     gap: 2,
+  },
+  bookTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111",
+  },
+  bookAuthor: {
+    fontSize: 14,
+    color: "#333",
+  },
+  unreadable: {
+    fontSize: 14,
+    color: "#b00",
+    fontWeight: "500",
   },
 });
