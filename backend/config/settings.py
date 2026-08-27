@@ -1,6 +1,26 @@
 from pathlib import Path
+import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _load_repo_dotenv() -> None:
+    """Pull KEY=VALUE from repo-root .env into os.environ (no override)."""
+    env_path = BASE_DIR.parent / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_repo_dotenv()
 
 SECRET_KEY = "django-insecure-shelfie-local-dev-only"
 
@@ -103,14 +123,23 @@ SPINE_DETECTION_TIMEOUT_S = 60
 # Weights land here on first run (gitignored).
 SPINE_DETECTION_WEIGHTS_DIR = BASE_DIR / "models"
 
-# Hosted VLM via Cursor Cloud Agents API. Key: CURSOR_API_KEY / repo-root .env.
-VLM_PROVIDER = "cursor"
-VLM_MODEL = "default"
-VLM_API_KEY_ENV = "CURSOR_API_KEY"
-# Cloud agent create may block until the first run finishes.
-VLM_TIMEOUT_S = 180
-# Cap VLM reads per uploaded photo (one cloud agent per crop is slow/pricey).
-VLM_MAX_SPINES_PER_PHOTO = 8
+# Hosted VLM — default OpenAI vision (fast). Cursor is automatic fallback.
+# Set VLM_PROVIDER=cursor to force Cursor only.
+VLM_PROVIDER = os.environ.get("VLM_PROVIDER", "openai").strip().lower()
+if VLM_PROVIDER == "cursor":
+    VLM_MODEL = os.environ.get("VLM_MODEL", "default")
+    VLM_API_KEY_ENV = "CURSOR_API_KEY"
+    VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "180"))
+else:
+    VLM_PROVIDER = "openai"
+    VLM_MODEL = os.environ.get("VLM_MODEL", "gpt-4o-mini")
+    VLM_API_KEY_ENV = "OPENAI_API_KEY"
+    VLM_TIMEOUT_S = int(os.environ.get("VLM_TIMEOUT_S", "45"))
+# Cap VLM reads per uploaded photo.
+VLM_MAX_SPINES_PER_PHOTO = int(os.environ.get("VLM_MAX_SPINES_PER_PHOTO", "8"))
+# Cursor model used when OpenAI fails (or when VLM_PROVIDER=cursor).
+VLM_CURSOR_MODEL = os.environ.get("VLM_CURSOR_MODEL", "default")
+VLM_CURSOR_TIMEOUT_S = int(os.environ.get("VLM_CURSOR_TIMEOUT_S", "180"))
 
 # Fuzzy catalog matching (see books/matching.py for the confidence formula).
 MATCH_AUTO_ACCEPT_THRESHOLD = 0.88  # ≥ this → AUTO_ACCEPTED (unless ambiguous)

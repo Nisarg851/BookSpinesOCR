@@ -1,18 +1,10 @@
 """
 Hosted vision-language spine reader.
 
-Provider: Cursor Cloud Agents API (https://api.cursor.com/v1/agents).
-We POST the spine crop as a base64 image on a no-repo cloud agent and poll
-the run until it finishes. This avoids the Cursor Python SDK local bridge,
-which crashes on Windows (WinError 10038 — select() on a pipe).
+Primary: OpenAI Chat Completions vision (gpt-4o-mini).
+Fallback: Cursor Cloud Agents when OpenAI fails or VLM_PROVIDER=cursor.
 
-Swap providers by changing `_call_provider` — `read_spine()` stays public.
-
-Model default: composer-2.5 (multimodal). Plan usage; cost logged as $0 when
-token meters aren't returned.
-
-API key: CURSOR_API_KEY from the environment (or repo-root `.env`).
-Never hardcode secrets.
+`read_spine()` stays public. API keys from repo-root .env — never hardcode.
 """
 
 from __future__ import annotations
@@ -25,6 +17,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -34,10 +27,11 @@ from django.conf import settings
 Status = Literal["ok", "unreadable", "timeout", "api_error", "missing_key"]
 
 CURSOR_API_BASE = "https://api.cursor.com/v1"
+OPENAI_API_BASE = "https://api.openai.com/v1"
 
-# Cursor usage is typically plan-included; log $0 unless we have token meters.
-INPUT_USD_PER_1M = 0.0
-OUTPUT_USD_PER_1M = 0.0
+# Rough gpt-4o-mini vision list prices (USD / 1M tokens) for logging only.
+INPUT_USD_PER_1M = 0.15
+OUTPUT_USD_PER_1M = 0.60
 
 SPINE_PROMPT = """You are reading text off a single book spine photo.
 Return ONLY strict JSON with this exact shape (no markdown, no extra keys):
@@ -82,10 +76,18 @@ def _load_repo_dotenv() -> None:
             os.environ[key] = value
 
 
-def _api_key() -> str | None:
+def _env_key(name: str) -> str | None:
     _load_repo_dotenv()
-    key = os.environ.get(settings.VLM_API_KEY_ENV, "").strip()
+    key = os.environ.get(name, "").strip()
     return key or None
+
+
+def _openai_key() -> str | None:
+    return _env_key("OPENAI_API_KEY")
+
+
+def _cursor_key() -> str | None:
+    return _env_key("CURSOR_API_KEY")
 
 
 def _estimate_cost(prompt_tokens: int, completion_tokens: int) -> float:
@@ -118,6 +120,92 @@ def _parse_spine_json(raw: str) -> tuple[str, str, str] | None:
     author = str(data.get("author") or "").strip()
     note = str(data.get("confidence_note") or "").strip()
     return title, author, note
+
+
+def _image_payload(image_path: Path) -> tuple[str, str]:
+    mime, _ = mimetypes.guess_type(str(image_path))
+    if mime not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
+        mime = "image/jpeg"
+    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return mime, image_b64
+
+
+def _call_openai(image_path: Path, api_key: str) -> tuple[str, int, int]:
+    """
+    OpenAI Chat Completions vision adapter.
+    Returns (raw_content, prompt_tokens, completion_tokens).
+    """
+    mime, image_b64 = _image_payload(image_path)
+    body = {
+        "model": settings.VLM_MODEL,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": SPINE_PROMPT},
+                    {
+                        "type": "image_url",
+                        # detail=low keeps TPM cost tiny (full crops were ~14k
+                        # tokens each and blew a 60k TPM free-tier limit).
+                        "image_url": {
+                            "url": f"data:{mime};base64,{image_b64}",
+                            "detail": "low",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    last_error: Exception | None = None
+    for attempt in range(4):
+        req = urllib.request.Request(
+            f"{OPENAI_API_BASE}/chat/completions",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(
+                req, timeout=float(settings.VLM_TIMEOUT_S)
+            ) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            last_error = RuntimeError(
+                f"OpenAI API HTTP {exc.code}: {detail[:500]}"
+            )
+            # Retry brief TPM / rate-limit windows.
+            if exc.code == 429 and attempt < 3:
+                wait_s = 1.5 * (attempt + 1)
+                time.sleep(wait_s)
+                continue
+            raise last_error from exc
+        except urllib.error.URLError as exc:
+            raise TimeoutError(str(exc)) from exc
+    else:
+        raise last_error or RuntimeError("OpenAI request failed")
+
+    choices = payload.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"OpenAI returned no choices: {payload!r}"[:500])
+    message = (choices[0] or {}).get("message") or {}
+    raw = str(message.get("content") or "").strip()
+    if not raw:
+        raise RuntimeError(f"OpenAI returned empty content: {payload!r}"[:500])
+
+    usage = payload.get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    completion_tokens = int(usage.get("completion_tokens") or 0)
+    return raw, prompt_tokens, completion_tokens
+
 
 
 def _basic_auth_header(api_key: str) -> str:
@@ -158,14 +246,8 @@ def _cursor_request(
 
 
 def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
-    """
-    Cloud Agents REST adapter (no local SDK bridge).
-    Returns (raw_content, prompt_tokens, completion_tokens).
-    """
-    mime, _ = mimetypes.guess_type(str(image_path))
-    if mime not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
-        mime = "image/jpeg"
-    image_b64 = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    """Cloud Agents REST adapter (slow fallback)."""
+    mime, image_b64 = _image_payload(image_path)
 
     created = _cursor_request(
         "POST",
@@ -176,10 +258,11 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
                 "text": SPINE_PROMPT,
                 "images": [{"data": image_b64, "mimeType": mime}],
             },
-            "model": {"id": settings.VLM_MODEL},
+            "model": {
+                "id": getattr(settings, "VLM_CURSOR_MODEL", None) or "default"
+            },
             "name": "shelfie-spine-read",
         },
-        # Create can block until the first run finishes (~20–90s).
         timeout=float(settings.VLM_TIMEOUT_S),
     )
     agent = created.get("agent") or {}
@@ -189,7 +272,6 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
     if not agent_id or not run_id:
         raise RuntimeError(f"Unexpected create response: {created!r}")
 
-    # Create responses often omit `result` even when status is FINISHED — always GET.
     deadline = time.monotonic() + float(settings.VLM_TIMEOUT_S)
     last: dict[str, Any] = {}
     while time.monotonic() < deadline:
@@ -213,7 +295,6 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
     if status != "FINISHED":
         raise RuntimeError(f"Cursor run status={status} result={raw[:300]!r}")
 
-    # Best-effort cleanup so spine reads don't pile up in the dashboard.
     try:
         _cursor_request("POST", f"/agents/{agent_id}/archive", api_key, body={})
     except Exception:
@@ -222,9 +303,40 @@ def _call_cursor(image_path: Path, api_key: str) -> tuple[str, int, int]:
     return raw, 0, 0
 
 
-def _call_provider(image_path: Path, api_key: str) -> tuple[str, int, int]:
-    """Single swap point for hosted providers."""
-    return _call_cursor(image_path, api_key)
+def _call_provider(image_path: Path) -> tuple[str, int, int, str]:
+    """
+    Call primary provider, with Cursor fallback when using OpenAI.
+    Returns (raw, prompt_tokens, completion_tokens, provider_used).
+    """
+    provider = (settings.VLM_PROVIDER or "openai").strip().lower()
+
+    if provider == "cursor":
+        key = _cursor_key()
+        if not key:
+            raise RuntimeError("CURSOR_API_KEY missing")
+        raw, pt, ct = _call_cursor(image_path, key)
+        return raw, pt, ct, "cursor"
+
+    openai_key = _openai_key()
+    cursor_key = _cursor_key()
+    if not openai_key and not cursor_key:
+        raise RuntimeError(
+            "VLM API key missing — set OPENAI_API_KEY (or CURSOR_API_KEY fallback)"
+        )
+
+    if openai_key:
+        try:
+            raw, pt, ct = _call_openai(image_path, openai_key)
+            return raw, pt, ct, "openai"
+        except Exception as openai_exc:
+            if not cursor_key:
+                raise
+            print(f"[vlm] openai failed ({openai_exc}); falling back to cursor")
+            raw, pt, ct = _call_cursor(image_path, cursor_key)
+            return raw, pt, ct, "cursor-fallback"
+
+    raw, pt, ct = _call_cursor(image_path, cursor_key)  # type: ignore[arg-type]
+    return raw, pt, ct, "cursor"
 
 
 def read_spine(image_path: str | Path) -> SpineRead:
@@ -243,11 +355,10 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status="unreadable",
             elapsed_ms=0,
             estimated_cost_usd=0.0,
-            confidence_note="image file missing",
+            confidence_note="Spine crop file is missing on disk",
         )
 
-    api_key = _api_key()
-    if not api_key:
+    if not _openai_key() and not _cursor_key():
         return SpineRead(
             title="",
             author="",
@@ -255,12 +366,16 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status="missing_key",
             elapsed_ms=0,
             estimated_cost_usd=0.0,
-            confidence_note=f"Set {settings.VLM_API_KEY_ENV} in the environment or .env",
+            confidence_note=(
+                "VLM API key missing — set OPENAI_API_KEY "
+                "(Cursor CURSOR_API_KEY is the fallback)"
+            ),
         )
 
     started = time.perf_counter()
+    provider_used = settings.VLM_PROVIDER
     try:
-        raw, prompt_tokens, completion_tokens = _call_provider(path, api_key)
+        raw, prompt_tokens, completion_tokens, provider_used = _call_provider(path)
     except TimeoutError as exc:
         elapsed = int((time.perf_counter() - started) * 1000)
         return SpineRead(
@@ -270,12 +385,25 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status="timeout",
             elapsed_ms=elapsed,
             estimated_cost_usd=0.0,
-            confidence_note="provider timeout",
+            confidence_note="Title reading timed out",
         )
     except Exception as exc:
         elapsed = int((time.perf_counter() - started) * 1000)
         name = type(exc).__name__
+        detail = str(exc)
         status: Status = "timeout" if "Timeout" in name else "api_error"
+        lower = detail.lower()
+        if "insufficient_quota" in lower or "exceeded your current quota" in lower:
+            note = (
+                "OpenAI quota exceeded (and Cursor fallback unavailable) — "
+                "add billing at platform.openai.com or set CURSOR_API_KEY"
+            )
+        elif "429" in detail and "rate" in lower:
+            note = "Title reader rate-limited — wait a moment and retry"
+        elif "Timeout" in name or status == "timeout":
+            note = "Title reading timed out"
+        else:
+            note = "Title reader failed (API error)"
         return SpineRead(
             title="",
             author="",
@@ -283,15 +411,15 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status=status,
             elapsed_ms=elapsed,
             estimated_cost_usd=0.0,
-            confidence_note="provider call failed",
+            confidence_note=note,
         )
 
     elapsed = int((time.perf_counter() - started) * 1000)
     cost = _estimate_cost(prompt_tokens, completion_tokens)
     print(
-        f"[vlm] provider=cursor-cloud model={settings.VLM_MODEL} ms={elapsed} "
-        f"prompt_tokens={prompt_tokens} completion_tokens={completion_tokens} "
-        f"est_cost_usd={cost:.6f} (0 = included in Cursor plan / unknown)"
+        f"[vlm] provider={provider_used} model={settings.VLM_MODEL} "
+        f"ms={elapsed} prompt_tokens={prompt_tokens} "
+        f"completion_tokens={completion_tokens} est_cost_usd={cost:.6f}"
     )
 
     parsed = _parse_spine_json(raw)
@@ -303,7 +431,7 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status="unreadable",
             elapsed_ms=elapsed,
             estimated_cost_usd=cost,
-            confidence_note="malformed JSON from VLM",
+            confidence_note="Title reader returned invalid (non-JSON) text",
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )
@@ -317,7 +445,7 @@ def read_spine(image_path: str | Path) -> SpineRead:
             status="unreadable",
             elapsed_ms=elapsed,
             estimated_cost_usd=cost,
-            confidence_note=note or "empty title",
+            confidence_note=note or "Title reader returned no title",
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
         )
@@ -335,11 +463,20 @@ def read_spine(image_path: str | Path) -> SpineRead:
     )
 
 
+# Persisted at the start of vlm_raw_response so the API can surface a short reason
+# without a schema migration.
+_VLM_NOTE_PREFIX = "VLM_NOTE:"
+
+
 def apply_spine_read(spine, result: SpineRead) -> None:
     """Write a SpineRead onto a DetectedSpine row (does not touch ShelfPhoto)."""
     spine.vlm_title = result.title
     spine.vlm_author = result.author
-    spine.vlm_raw_response = result.raw_text
+    if result.status == "ok":
+        spine.vlm_raw_response = result.raw_text
+    else:
+        note = result.confidence_note or result.status
+        spine.vlm_raw_response = f"{_VLM_NOTE_PREFIX}{note}\n{result.raw_text}"
     spine.vlm_status = "OK" if result.status == "ok" else "UNREADABLE"
     spine.save(
         update_fields=[
@@ -351,36 +488,61 @@ def apply_spine_read(spine, result: SpineRead) -> None:
     )
 
 
+def extract_vlm_note(raw_response: str, vlm_status: str) -> str:
+    """Short user-facing reason for a failed/unread spine read."""
+    raw = raw_response or ""
+    if raw.startswith(_VLM_NOTE_PREFIX):
+        return raw.split("\n", 1)[0][len(_VLM_NOTE_PREFIX) :].strip()
+    if vlm_status == "UNREADABLE":
+        return "Couldn’t read a title from this spine"
+    return ""
+
+
+def _read_one_spine(spine) -> tuple[Any, SpineRead]:
+    if not spine.crop:
+        read = SpineRead(
+            title="",
+            author="",
+            raw_text="",
+            status="unreadable",
+            elapsed_ms=0,
+            estimated_cost_usd=0.0,
+            confidence_note="Missing spine crop file",
+        )
+        return spine, read
+    return spine, read_spine(spine.crop.path)
+
+
 def read_spines_for_photo(photo, *, limit: int | None = None) -> list[SpineRead]:
     """
     Run VLM on crop files for a ShelfPhoto. Accumulates sum(elapsed_ms) into
     photo.vlm_ms — that per-image total is what the README latency table needs.
+
+    OpenAI/Gemini calls are parallelized (thread pool); Cursor stays sequential.
     """
-    results: list[SpineRead] = []
-    total_ms = 0
     spines = list(photo.spines.all())
     if limit is not None:
         spines = spines[:limit]
+    if not spines:
+        photo.vlm_ms = 0
+        photo.save(update_fields=["vlm_ms"])
+        return []
 
-    for spine in spines:
-        if not spine.crop:
-            read = SpineRead(
-                title="",
-                author="",
-                raw_text="",
-                status="unreadable",
-                elapsed_ms=0,
-                estimated_cost_usd=0.0,
-                confidence_note="missing crop file",
-            )
+    provider = (settings.VLM_PROVIDER or "openai").strip().lower()
+    if provider == "cursor":
+        workers = 1
+    else:
+        workers = min(3, len(spines))
+
+    results_by_id: dict[int, SpineRead] = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_read_one_spine, spine) for spine in spines]
+        for future in as_completed(futures):
+            spine, read = future.result()
             apply_spine_read(spine, read)
-            results.append(read)
-            continue
-        read = read_spine(spine.crop.path)
-        apply_spine_read(spine, read)
-        total_ms += read.elapsed_ms
-        results.append(read)
+            results_by_id[spine.id] = read
 
-    photo.vlm_ms = total_ms
+    ordered = [results_by_id[s.id] for s in spines]
+    photo.vlm_ms = sum(r.elapsed_ms for r in ordered)
     photo.save(update_fields=["vlm_ms"])
-    return results
+    return ordered

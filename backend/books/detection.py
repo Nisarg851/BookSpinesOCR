@@ -138,7 +138,10 @@ def detect_spines(image_path: str | Path) -> DetectionResult:
     if image is None:
         return DetectionResult(
             status="unreadable_image",
-            message=f"Could not open image: {path}",
+            message=(
+                "That file isn’t a readable image "
+                "(corrupt, truncated, or not an image format)."
+            ),
         )
     image.close()
 
@@ -160,7 +163,10 @@ def detect_spines(image_path: str | Path) -> DetectionResult:
         return DetectionResult(
             status="model_load_failed",
             detection_ms=elapsed,
-            message=str(exc) or "YOLO model failed to load or run",
+            message=(
+                "Local book-detection model failed to load or run on this image. "
+                f"Detail: {exc}"
+            ),
         )
 
     elapsed = int((time.perf_counter() - started) * 1000)

@@ -1,5 +1,5 @@
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import {
   filterCatalog,
   type ConfirmAction,
 } from "../confirm";
+import FullImageModal from "../components/FullImageModal";
 import type { ReviewNav, ReviewRoute } from "../navigation";
 import type { CatalogBook, DetectedSpine } from "../types";
 
@@ -75,6 +76,8 @@ export default function ReviewScreen() {
   const [finishing, setFinishing] = useState(false);
   const [correctSpineId, setCorrectSpineId] = useState<number | null>(null);
   const [catalog, setCatalog] = useState<CatalogBook[]>([]);
+  const [fullImageUri, setFullImageUri] = useState<string | null>(null);
+  const inFlight = useRef(new Set<number>());
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +116,10 @@ export default function ReviewScreen() {
       onOk: (label: string) => SpineUiState,
       resume: "auto_kept" | "needs_action"
     ) => {
+      if (inFlight.current.has(spine.id)) {
+        return;
+      }
+      inFlight.current.add(spine.id);
       setSpine(spine.id, { phase: "busy" });
       try {
         await confirmSpine(spine.id, body);
@@ -121,6 +128,8 @@ export default function ReviewScreen() {
         const message =
           err instanceof Error ? err.message : "Couldn’t save this decision.";
         setSpine(spine.id, { phase: "error", message, resume });
+      } finally {
+        inFlight.current.delete(spine.id);
       }
     },
     [setSpine]
@@ -224,7 +233,9 @@ export default function ReviewScreen() {
           shooting edge-on, and making sure the titles are lit.
         </Text>
         {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.emptyPreview} />
+          <Pressable onPress={() => setFullImageUri(imageUri)}>
+            <Image source={{ uri: imageUri }} style={styles.emptyPreview} />
+          </Pressable>
         ) : null}
         <Pressable
           style={styles.primaryBtn}
@@ -232,6 +243,10 @@ export default function ReviewScreen() {
         >
           <Text style={styles.primaryBtnText}>Retake photo</Text>
         </Pressable>
+        <FullImageModal
+          uri={fullImageUri}
+          onClose={() => setFullImageUri(null)}
+        />
       </View>
     );
   }
@@ -255,7 +270,7 @@ export default function ReviewScreen() {
         <Text style={styles.hint}>
           High-confidence matches are queued to add — remove any that are wrong
           before you finish. Everything else needs an explicit accept, correct,
-          or discard.
+          or discard. Tap a crop to enlarge it.
         </Text>
 
         {spines.map((spine) => (
@@ -267,6 +282,7 @@ export default function ReviewScreen() {
             onDiscard={() => onDiscard(spine, "needs_action")}
             onUndoAuto={() => onUndoAuto(spine)}
             onCorrect={() => setCorrectSpineId(spine.id)}
+            onOpenImage={(uri) => setFullImageUri(uri)}
             onRetryError={() => {
               const st = ui[spine.id];
               if (st?.phase === "error") {
@@ -309,6 +325,11 @@ export default function ReviewScreen() {
           onSubmit={(body) => void onCorrectSubmit(correctSpine, body)}
         />
       ) : null}
+
+      <FullImageModal
+        uri={fullImageUri}
+        onClose={() => setFullImageUri(null)}
+      />
     </View>
   );
 }
@@ -320,6 +341,7 @@ function SpineCard({
   onDiscard,
   onUndoAuto,
   onCorrect,
+  onOpenImage,
   onRetryError,
 }: {
   spine: DetectedSpine;
@@ -328,6 +350,7 @@ function SpineCard({
   onDiscard: () => void;
   onUndoAuto: () => void;
   onCorrect: () => void;
+  onOpenImage: (uri: string) => void;
   onRetryError: () => void;
 }) {
   const suggested = hasSuggestedMatch(spine);
@@ -339,7 +362,9 @@ function SpineCard({
     <View style={styles.card}>
       <View style={styles.cardRow}>
         {spine.crop_url ? (
-          <Image source={{ uri: spine.crop_url }} style={styles.crop} />
+          <Pressable onPress={() => onOpenImage(spine.crop_url!)}>
+            <Image source={{ uri: spine.crop_url }} style={styles.crop} />
+          </Pressable>
         ) : (
           <View style={[styles.crop, styles.cropPlaceholder]} />
         )}
@@ -355,9 +380,17 @@ function SpineCard({
               </Text>
             </>
           ) : spine.vlm_status === "UNREADABLE" ? (
-            <Text style={styles.unreadable}>Unreadable spine</Text>
+            <>
+              <Text style={styles.unreadable}>Couldn’t read this spine</Text>
+              <Text style={styles.muted}>
+                {spine.vlm_note ||
+                  "Title reader failed — enter the book manually or discard."}
+              </Text>
+            </>
           ) : (
-            <Text style={styles.muted}>Spine text not available</Text>
+            <Text style={styles.muted}>
+              {spine.vlm_note || "Spine text not available yet"}
+            </Text>
           )}
 
           {state.phase === "auto_kept" && catalog ? (

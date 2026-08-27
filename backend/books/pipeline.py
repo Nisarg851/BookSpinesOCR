@@ -126,6 +126,10 @@ def confirm_spine(
 ) -> tuple[MatchResult, LibraryEntry | None]:
     """
     Human-in-the-loop confirm/correct/discard for one spine's MatchResult.
+
+    Double-submit of the same terminal action is idempotent (no crash).
+    Conflicting actions on an already-finalized spine raise ValueError with a
+    clear message for the API to return as 400.
     """
     action = (action or "").strip().lower()
     try:
@@ -140,6 +144,8 @@ def confirm_spine(
 
     with transaction.atomic():
         if action == "discard":
+            if match.status == MatchResult.Status.DISCARDED:
+                return match, None
             match.status = MatchResult.Status.DISCARDED
             match.save(update_fields=["status"])
             if hasattr(match, "library_entry"):
@@ -147,6 +153,17 @@ def confirm_spine(
             return match, None
 
         if action == "accept":
+            if match.status in {
+                MatchResult.Status.CONFIRMED,
+                MatchResult.Status.CORRECTED,
+            }:
+                entry = LibraryEntry.objects.filter(match_result=match).first()
+                return match, entry
+            if match.status == MatchResult.Status.DISCARDED:
+                raise ValueError(
+                    "This spine was already discarded. Use Correct to add a book, "
+                    "or leave it discarded."
+                )
             if match.catalog_book is None:
                 raise ValueError("No suggested catalog match to accept")
             match.status = MatchResult.Status.CONFIRMED

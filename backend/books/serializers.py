@@ -7,6 +7,7 @@ from .models import (
     MatchResult,
     ShelfPhoto,
 )
+from .vlm import extract_vlm_note
 
 
 class CatalogBookSerializer(serializers.ModelSerializer):
@@ -40,6 +41,7 @@ class MatchResultSerializer(serializers.ModelSerializer):
 
 class DetectedSpineSerializer(serializers.ModelSerializer):
     crop_url = serializers.SerializerMethodField()
+    vlm_note = serializers.SerializerMethodField()
     match = MatchResultSerializer(read_only=True)
 
     class Meta:
@@ -55,6 +57,7 @@ class DetectedSpineSerializer(serializers.ModelSerializer):
             "vlm_status",
             "vlm_title",
             "vlm_author",
+            "vlm_note",
             "match",
         ]
         read_only_fields = fields
@@ -67,6 +70,9 @@ class DetectedSpineSerializer(serializers.ModelSerializer):
         if request is not None:
             return request.build_absolute_uri(url)
         return url
+
+    def get_vlm_note(self, obj: DetectedSpine) -> str:
+        return extract_vlm_note(obj.vlm_raw_response, obj.vlm_status)
 
 
 class ShelfPhotoDetailSerializer(serializers.ModelSerializer):

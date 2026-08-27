@@ -24,7 +24,7 @@ MAX_DOWNLOAD_BYTES = 15 * 1024 * 1024
 @api_view(["GET"])
 def health(request):
     """Placeholder so the Expo app can confirm it reaches Django."""
-    return Response({"status": "ok", "service": "shelfie"})
+    return Response({"status": "ok", "service": "book-spines-ocr"})
 
 
 class CatalogBookList(generics.ListAPIView):
@@ -53,20 +53,55 @@ def _write_upload_to_temp(upload: UploadedFile) -> Path:
 
 
 def _download_url_to_temp(url: str) -> tuple[Path | None, str | None]:
+    from urllib.parse import urlparse
+
+    raw = (url or "").strip()
+    if not raw:
+        return None, "Image URL is empty"
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"}:
+        return None, "Image URL must start with http:// or https://"
+    if not parsed.netloc:
+        return None, "Image URL is missing a host (e.g. https://example.com/shelf.jpg)"
+
     try:
-        req = Request(url, headers={"User-Agent": "Shelfie/0.1"})
+        req = Request(raw, headers={"User-Agent": "BookSpinesOCR/0.1"})
         with urlopen(req, timeout=20) as resp:
             content_type = (resp.headers.get("Content-Type") or "").lower()
             if content_type and not content_type.startswith("image/"):
-                return None, f"URL did not look like an image ({content_type})"
+                return None, (
+                    f"URL did not return an image (Content-Type: {content_type}). "
+                    "Use a direct link to a .jpg/.png/.webp file."
+                )
             data = resp.read(MAX_DOWNLOAD_BYTES + 1)
-    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-        return None, f"Could not download image URL: {exc}"
+    except HTTPError as exc:
+        if exc.code == 403:
+            return None, (
+                "Download forbidden (HTTP 403) — the host blocked this request "
+                "(hotlink protection or private URL)."
+            )
+        if exc.code == 401:
+            return None, "Download unauthorized (HTTP 401) — this image URL requires login."
+        if exc.code == 404:
+            return None, "Image URL not found (HTTP 404)."
+        return None, f"Could not download image URL (HTTP {exc.code})."
+    except TimeoutError:
+        return None, "Timed out downloading the image URL (20s limit)."
+    except URLError as exc:
+        reason = str(getattr(exc, "reason", exc) or exc)
+        lower = reason.lower()
+        if "getaddrinfo" in lower or "name or service not known" in lower or "nodename" in lower:
+            return None, f"Could not resolve host for that URL ({parsed.netloc})."
+        if "certificate" in lower or "ssl" in lower:
+            return None, f"TLS/SSL error downloading the image: {reason}"
+        return None, f"Network error downloading the image: {reason}"
+    except ValueError as exc:
+        return None, f"Invalid image URL: {exc}"
 
     if len(data) > MAX_DOWNLOAD_BYTES:
         return None, "Image URL exceeds 15MB limit"
     if not data:
-        return None, "Image URL returned empty body"
+        return None, "Image URL returned an empty body"
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
     tmp.write(data)
@@ -148,7 +183,18 @@ def photo_create(request):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        result = process_photo_image(temp_path)
+        try:
+            result = process_photo_image(temp_path)
+        except Exception as exc:
+            return Response(
+                {
+                    "ok": False,
+                    "message": f"Photo processing failed unexpectedly: {exc}",
+                    "spines": [],
+                    "detection_status": "pipeline_error",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         det = result.detection
 
         # Corrupt image / model failure → 422 with structured body.

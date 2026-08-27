@@ -9,20 +9,33 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { getApiBaseUrl } from "../api";
+import FullImageModal from "../components/FullImageModal";
 import type { CaptureNav } from "../navigation";
-import { uploadShelfPhoto } from "../photos";
+import {
+  checkHealth,
+  uploadShelfPhoto,
+  uploadShelfPhotoFromUrl,
+  type HealthOutcome,
+} from "../photos";
 import type { UploadOutcome } from "../types";
 
 type BusyPhase = "idle" | "picking" | "uploading";
 
+type HealthState =
+  | { status: "loading" }
+  | { status: "ok"; detail: string }
+  | { status: "error"; detail: string };
+
 const PROGRESS_LINES = [
   "Uploading photo…",
   "Detecting book spines…",
-  "Reading titles with VLM (this can take a minute per spine)…",
+  "Reading titles with OpenAI (usually a few seconds)…",
   "Matching against the catalog…",
   "Still working — hang tight…",
 ];
@@ -45,20 +58,54 @@ function outcomeMessage(outcome: UploadOutcome): string {
   }
 }
 
+function healthFromOutcome(outcome: HealthOutcome): HealthState {
+  if (outcome.kind === "ok") {
+    return { status: "ok", detail: outcome.body };
+  }
+  return { status: "error", detail: outcome.message };
+}
+
 export default function CaptureScreen() {
   const navigation = useNavigation<CaptureNav>();
+  const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState<BusyPhase>("idle");
   const [progressLine, setProgressLine] = useState(PROGRESS_LINES[0]);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState("");
   const [userMessage, setUserMessage] = useState<string | null>(null);
   const [messageKind, setMessageKind] = useState<
     "info" | "error" | "zero" | null
   >(null);
+  const [fullImageUri, setFullImageUri] = useState<string | null>(null);
+  const [health, setHealth] = useState<HealthState>({ status: "loading" });
+  const [healthDetailOpen, setHealthDetailOpen] = useState(false);
   const progressIndex = useRef(0);
 
   const isBusy = busy !== "idle";
   const apiBase = getApiBaseUrl();
+
+  const refreshHealth = useCallback(async () => {
+    setHealth({ status: "loading" });
+    setHealthDetailOpen(false);
+    const outcome = await checkHealth();
+    setHealth(healthFromOutcome(outcome));
+  }, []);
+
+  const onHealthPress = useCallback(() => {
+    if (health.status === "loading") {
+      return;
+    }
+    if (health.status === "ok") {
+      setHealthDetailOpen((open) => !open);
+      return;
+    }
+    void refreshHealth();
+  }, [health.status, refreshHealth]);
+
+  useEffect(() => {
+    void refreshHealth();
+  }, [refreshHealth]);
 
   useEffect(() => {
     if (busy !== "uploading") {
@@ -129,7 +176,26 @@ export default function CaptureScreen() {
     [handleOutcome]
   );
 
-  const pickFromLibrary = useCallback(async () => {
+  const submitUrl = useCallback(async () => {
+    const url = urlInput.trim();
+    if (!url) {
+      setMessageKind("error");
+      setUserMessage("Paste an image URL first.");
+      return;
+    }
+    setBusy("uploading");
+    setUserMessage(null);
+    setMessageKind(null);
+    setPreviewUri(url);
+    try {
+      const outcome = await uploadShelfPhotoFromUrl(url);
+      handleOutcome(outcome, url);
+    } finally {
+      setBusy("idle");
+    }
+  }, [handleOutcome, urlInput]);
+
+  const pickFromDevice = useCallback(async () => {
     setBusy("picking");
     setUserMessage(null);
     try {
@@ -179,10 +245,21 @@ export default function CaptureScreen() {
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[
+        styles.container,
+        { paddingTop: Math.max(insets.top, 16) + 8 },
+      ]}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.title}>Shelfie</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Book Spines OCR</Text>
+        <Pressable
+          onPress={() => navigation.navigate("Library")}
+          style={styles.navButton}
+        >
+          <Text style={styles.navButtonText}>Library</Text>
+        </Pressable>
+      </View>
       <Text style={styles.subtitle}>
         Photograph a bookshelf. We’ll detect spines, read titles, and match
         them to the catalog.
@@ -190,6 +267,23 @@ export default function CaptureScreen() {
 
       <Text style={styles.label}>Backend</Text>
       <Text style={styles.mono}>{apiBase}</Text>
+      <Pressable onPress={onHealthPress} hitSlop={6} style={styles.healthBadge}>
+        {health.status === "loading" ? (
+          <Text style={styles.healthMuted}>checking…</Text>
+        ) : health.status === "ok" ? (
+          <Text style={styles.healthOk}>
+            healthy{healthDetailOpen ? " ▾" : " ▸"}
+          </Text>
+        ) : (
+          <Text style={styles.healthBad}>down — tap to retry</Text>
+        )}
+      </Pressable>
+      {health.status === "ok" && healthDetailOpen ? (
+        <Text style={styles.healthDetail}>{health.detail}</Text>
+      ) : null}
+      {health.status === "error" ? (
+        <Text style={styles.healthDetailError}>{health.detail}</Text>
+      ) : null}
 
       <View style={styles.row}>
         <Pressable
@@ -200,21 +294,45 @@ export default function CaptureScreen() {
           <Text style={styles.buttonText}>Take photo</Text>
         </Pressable>
         <Pressable
-          style={[styles.button, styles.buttonSecondary, isBusy && styles.buttonDisabled]}
+          style={[
+            styles.button,
+            styles.buttonSecondary,
+            isBusy && styles.buttonDisabled,
+          ]}
           disabled={isBusy}
-          onPress={() => void pickFromLibrary()}
+          onPress={() => void pickFromDevice()}
         >
-          <Text style={styles.buttonTextSecondary}>Choose from library</Text>
+          <Text style={styles.buttonTextSecondary}>Choose from device</Text>
         </Pressable>
       </View>
+
+      <Text style={styles.label}>Or image URL</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="https://example.com/bookshelf.jpg"
+        placeholderTextColor="#9ca3af"
+        autoCapitalize="none"
+        autoCorrect={false}
+        value={urlInput}
+        onChangeText={setUrlInput}
+        editable={!isBusy}
+        keyboardType="url"
+      />
+      <Pressable
+        style={[styles.button, isBusy && styles.buttonDisabled]}
+        disabled={isBusy}
+        onPress={() => void submitUrl()}
+      >
+        <Text style={styles.buttonText}>Detect from URL</Text>
+      </Pressable>
 
       {busy === "uploading" ? (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#111" />
           <Text style={styles.loadingTitle}>{progressLine}</Text>
           <Text style={styles.loadingHint}>
-            {elapsedSec}s elapsed · usually 30s–a few minutes depending on how
-            many spines we find
+            {elapsedSec}s elapsed · usually a few seconds to a minute depending
+            on how many spines we find
           </Text>
         </View>
       ) : null}
@@ -241,9 +359,16 @@ export default function CaptureScreen() {
       {previewUri && busy !== "uploading" ? (
         <View style={styles.previewWrap}>
           <Text style={styles.label}>Last photo</Text>
-          <Image source={{ uri: previewUri }} style={styles.preview} />
+          <Pressable onPress={() => setFullImageUri(previewUri)}>
+            <Image source={{ uri: previewUri }} style={styles.preview} />
+          </Pressable>
         </View>
       ) : null}
+
+      <FullImageModal
+        uri={fullImageUri}
+        onClose={() => setFullImageUri(null)}
+      />
     </ScrollView>
   );
 }
@@ -256,10 +381,30 @@ const styles = StyleSheet.create({
     gap: 10,
     flexGrow: 1,
   },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 14,
+    marginBottom: 4,
+  },
   title: {
+    flexShrink: 1,
     fontSize: 28,
     fontWeight: "600",
-    marginBottom: 4,
+  },
+  navButton: {
+    borderWidth: 1,
+    borderColor: "#111",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: "#111",
+  },
+  navButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#fff"
   },
   subtitle: {
     color: "#444",
@@ -282,6 +427,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#333",
   },
+  healthBadge: {
+    alignSelf: "flex-start",
+    marginTop: 2,
+  },
+  healthOk: {
+    color: "#0a7",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  healthBad: {
+    color: "#b00",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  healthMuted: {
+    color: "#888",
+    fontSize: 13,
+  },
+  healthDetail: {
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+    fontSize: 12,
+    color: "#333",
+    backgroundColor: "#f5f5f5",
+    padding: 10,
+    borderRadius: 6,
+  },
+  healthDetailError: {
+    fontSize: 13,
+    color: "#b00",
+    lineHeight: 18,
+  },
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -293,6 +473,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
+    alignSelf: "flex-start",
   },
   buttonSecondary: {
     backgroundColor: "#fff",
@@ -309,6 +490,16 @@ const styles = StyleSheet.create({
   buttonTextSecondary: {
     color: "#111",
     fontWeight: "600",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    width: "100%",
+    color: "#111",
+    fontSize: 15,
   },
   loadingBox: {
     marginTop: 20,

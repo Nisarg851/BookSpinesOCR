@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 
+import FullImageModal from "../components/FullImageModal";
 import { fetchLibrary, type LibraryEntry } from "../library";
 import type { RootStackParamList } from "../navigation";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -23,6 +24,7 @@ export default function LibraryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fullImageUri, setFullImageUri] = useState<string | null>(null);
 
   const load = useCallback(async (mode: "initial" | "refresh") => {
     if (mode === "refresh") {
@@ -89,7 +91,9 @@ export default function LibraryScreen() {
         renderItem={({ item }) => (
           <View style={styles.row}>
             {item.crop_url ? (
-              <Image source={{ uri: item.crop_url }} style={styles.thumb} />
+              <Pressable onPress={() => setFullImageUri(item.crop_url)}>
+                <Image source={{ uri: item.crop_url }} style={styles.thumb} />
+              </Pressable>
             ) : (
               <View style={[styles.thumb, styles.thumbPlaceholder]} />
             )}
@@ -99,6 +103,10 @@ export default function LibraryScreen() {
             </View>
           </View>
         )}
+      />
+      <FullImageModal
+        uri={fullImageUri}
+        onClose={() => setFullImageUri(null)}
       />
     </View>
   );

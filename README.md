@@ -1,22 +1,43 @@
-# Shelfie
+# Book Spines OCR
 
-Photo of a bookshelf → structured personal library.
+Photo of a bookshelf → structured personal library (local take-home).
 
-This is a local-only take-home: Expo (React Native) client + Django REST API. No deployment.
+**Expo (React Native/TypeScript) client** + **Django REST API** + **SQLite**. No deploy/auth/CI required.
 
-## Status
+## What it does
 
-End-to-end API is wired: `POST /api/photos/` runs detect → VLM → match synchronously and returns spines with MatchResults + latency. Confirm/correct/discard and library list work. Expo shows titles, match status, and latency. A dedicated review-screen UX polish and fuller README tradeoffs remain.
+1. Capture / pick / URL-upload a shelf photo  
+2. Local YOLO detects book-like regions and crops them  
+3. Hosted VLM reads title/author per crop (**OpenAI `gpt-4o-mini`**, **Cursor Cloud Agents** as automatic fallback)  
+4. Fuzzy-match against `catalog.csv`  
+5. Human-in-the-loop review (accept / correct / discard)  
+6. Confirmed books land in the library list  
 
-## Stack (local vs hosted)
+## Stack
 
-| Piece | Where it runs |
+| Piece | Where |
 | --- | --- |
-| Spine/book detection (YOLOv8n, COCO pretrained, CPU) | Local |
-| Title/author read from spine crops | Hosted — Cursor Cloud Agents (`composer-2.5`) |
-| Catalog match + library | Local SQLite (catalog loaded; matching not wired yet) |
+| Detection — Ultralytics YOLOv8n (COCO `book`, CPU, no training) | Local |
+| Spine title/author VLM | Hosted OpenAI (primary) / Cursor (fallback) |
+| Catalog match (`rapidfuzz`) + library | Local SQLite |
+| Mobile UI | Expo |
+
+**Honest limit:** COCO `book` is not a per-spine segmenter — one box may cover a cluster of spines. The review UI is designed for that messiness.
 
 ## Setup
+
+### Secrets (never commit)
+
+Copy `.env.example` → `.env` at the repo root:
+
+```
+VLM_PROVIDER=openai
+VLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...
+CURSOR_API_KEY=crsr_...   # optional fallback
+```
+
+Force Cursor only with `VLM_PROVIDER=cursor`.
 
 ### Backend
 
@@ -30,59 +51,66 @@ python manage.py load_catalog
 python manage.py runserver 0.0.0.0:8000
 ```
 
-First detection download: Ultralytics fetches `yolov8n.pt` into `backend/models/` (gitignored).
+First detection run downloads `yolov8n.pt` into `backend/models/` (gitignored).
 
-Smoke-test detection without the API:
-
-```powershell
-python manage.py detect_spines samples\bookshelf.jpg
-```
-
-Endpoints:
-- `GET /api/health/`
-- `GET /api/catalog/`
-- `POST /api/photos/` — multipart `image` **or** JSON `{"url":"..."}`; runs detect → VLM → match synchronously
-- `GET /api/photos/<id>/` — refetch photo + spines + matches + latency
-- `POST /api/spines/<id>/confirm/` — `{action: accept|correct|discard}`
-- `GET /api/library/` — confirmed LibraryEntry rows
-- `/admin/` — `python manage.py createsuperuser`
-
-### Mobile (Expo)
+### Mobile
 
 ```powershell
 cd mobile
 npm install
+# Physical phone: copy mobile/.env.example → mobile/.env with your LAN IP
 npx expo start
 ```
 
-On a **physical device**, create `mobile/.env` from `.env.example` with your PC Wi‑Fi IP, then restart Expo.
+## API
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/api/health/` | Reachability |
+| `GET` | `/api/catalog/` | Catalog books |
+| `POST` | `/api/photos/` | Multipart `image` **or** JSON `{"url":"..."}`; sync detect→VLM→match |
+| `GET` | `/api/photos/<id>/` | Refetch + latency |
+| `POST` | `/api/spines/<id>/confirm/` | `{action: accept\|correct\|discard}` |
+| `GET` | `/api/library/` | Confirmed entries |
+
+Zero detections / failed VLMs return **200** with an empty or partial spine list (not a 500). Corrupt images / model load failures return **422** with a structured message.
+
+Latency fields on photo responses: `detection_ms`, `vlm_ms`, `matching_ms`, `total_ms`.
+
+## App screens
+
+- **Capture** — camera, device library, or image URL; health badge; loading state  
+- **Review** — HITL for each spine; auto-matches can be removed before Done writes the library  
+- **Library** — pull-to-refresh list of confirmed books  
 
 ## Catalog
 
-`catalog.csv` has ~130 books with deliberate ambiguities. Load with `python manage.py load_catalog`.
+`catalog.csv` (~130 rows) includes deliberate ambiguities (e.g. same title / different authors, US/UK retitles as `alt_titles`). Load with `python manage.py load_catalog` (idempotent).
 
-## Measured latency / cost
+Matcher tests: `python manage.py test books.tests`
 
-Sample photo `samples/bookshelf.jpg` (management command, CPU, YOLOv8n):
+## Latency notes
 
-| Stage | Measured |
+| Stage | Typical |
 | --- | --- |
-| Detection (first warm-ish run after weight download) | ~7.3 s |
-| Detection (subsequent API smoke test) | ~3.9 s |
-| Boxes / crops | 47 |
+| Detection (CPU YOLO) | ~4–8 s |
+| VLM OpenAI (detail=low, parallel ≤3) | ~1 s / crop → often tens of seconds for a shelf |
+| VLM Cursor fallback | ~1 min / crop (much slower) |
+| Matching | &lt;1 s |
 
-VLM (Cursor Cloud Agents, model `default` / Auto, no-repo). Measured on three real crops from `backend/media/crops/1/`:
+Cap spines per photo with `VLM_MAX_SPINES_PER_PHOTO` (default 8).
 
-| Crop | Title / author returned | `vlm_ms` |
-| --- | --- | --- |
-| `3.jpg` | Water for Elephants / Sara Gruen | ~63.5 s |
-| `10.jpg` | INTO THIN AIR / Jon Krakauer | ~65.4 s |
-| `24.jpg` | STATION ELEVEN / EMILY ST. JOHN MANDEL | ~65.5 s |
+## Tradeoffs / “another day”
 
-Per-call cost logged as `$0` (Cursor plan / no token meter on this API). Cap: `VLM_MAX_SPINES_PER_PHOTO` (default 8). Requires `CURSOR_API_KEY` in repo-root `.env` and Cloud Agent storage enabled.
+- COCO detection ≠ spine instance segmentation — a trained spine model would help recall/precision  
+- Sync pipeline blocks the HTTP request (fine for the exercise; queue/workers for production)  
+- No auth, multi-user library, or deployment  
+- OpenAI TPM limits on free/low tiers — we use `detail=low`, retries, and modest parallelism  
 
-Honest caveat: COCO `book` is not a spine segmenter — one detection may cover a cluster of spines.
+## Samples
 
-## What's unfinished
+`samples/bookshelf.jpg` is the default smoke photo:
 
-VLM per-crop reads, fuzzy catalog matching, review screen, library confirm flow, matching tests, fuller README tradeoffs.
+```powershell
+python manage.py detect_spines samples\bookshelf.jpg
+```

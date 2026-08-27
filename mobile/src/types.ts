@@ -22,6 +22,8 @@ export type DetectedSpine = {
   vlm_status: "PENDING" | "OK" | "UNREADABLE";
   vlm_title: string;
   vlm_author: string;
+  /** Short reason when VLM timed out / returned bad JSON / empty title. */
+  vlm_note?: string;
   match: MatchResult | null;
 };
 
