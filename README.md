@@ -32,6 +32,12 @@ python manage.py runserver 0.0.0.0:8000
 
 `load_catalog` upserts from repo-root `catalog.csv` (safe to re-run). Health check: `http://127.0.0.1:8000/api/health/` → `{"status":"ok","service":"shelfie"}`
 
+Also available:
+- `GET /api/catalog/` — all CatalogBook rows
+- `GET /api/library/` — confirmed library (empty until review flow exists)
+- `/admin/` — Django admin (create a local superuser with `python manage.py createsuperuser`)
+
+
 `0.0.0.0` is required so a physical phone on the same LAN can reach the API. Simulators can use localhost / `10.0.2.2`.
 
 ### Mobile (Expo)
