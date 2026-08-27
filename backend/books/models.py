@@ -23,7 +23,7 @@ class CatalogBook(models.Model):
 class ShelfPhoto(models.Model):
     """Uploaded bookshelf photo plus measured pipeline stage latencies."""
 
-    image = models.ImageField(upload_to="shelf_photos/")
+    image = models.ImageField(upload_to="shelf_photos/", blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     detection_ms = models.PositiveIntegerField(null=True, blank=True)
     vlm_ms = models.PositiveIntegerField(null=True, blank=True)
@@ -49,7 +49,8 @@ class DetectedSpine(models.Model):
     y1 = models.FloatField()
     x2 = models.FloatField()
     y2 = models.FloatField()
-    crop = models.ImageField(upload_to="spine_crops/", blank=True)
+    crop = models.ImageField(upload_to="crops/", blank=True)
+    confidence = models.FloatField(default=0.0)
     # Filled later by the hosted VLM.
     vlm_title = models.CharField(max_length=512, blank=True, default="")
     vlm_author = models.CharField(max_length=512, blank=True, default="")

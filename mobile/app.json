@@ -7,7 +7,11 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Shelfie needs the camera to photograph your bookshelf.",
+        "NSPhotoLibraryUsageDescription": "Shelfie needs photo library access to pick a bookshelf photo."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +20,23 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Shelfie to pick a bookshelf photo.",
+          "cameraPermission": "Allow Shelfie to photograph your bookshelf."
+        }
+      ]
+    ]
   }
 }

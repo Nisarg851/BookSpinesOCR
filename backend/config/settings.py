@@ -95,3 +95,11 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ],
 }
+
+# Local spine detection (Ultralytics YOLOv8n, COCO pretrained, CPU).
+SPINE_DETECTION_MODEL = "yolov8n.pt"
+SPINE_DETECTION_CONFIDENCE = 0.25
+SPINE_DETECTION_TIMEOUT_S = 60
+# Weights land here on first run (gitignored).
+SPINE_DETECTION_WEIGHTS_DIR = BASE_DIR / "models"
+

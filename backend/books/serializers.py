@@ -29,22 +29,17 @@ class ShelfPhotoSerializer(serializers.ModelSerializer):
         model = ShelfPhoto
         fields = [
             "id",
-            "image",
             "uploaded_at",
             "detection_ms",
             "vlm_ms",
             "matching_ms",
         ]
-        read_only_fields = [
-            "id",
-            "uploaded_at",
-            "detection_ms",
-            "vlm_ms",
-            "matching_ms",
-        ]
+        read_only_fields = fields
 
 
 class DetectedSpineSerializer(serializers.ModelSerializer):
+    crop_url = serializers.SerializerMethodField()
+
     class Meta:
         model = DetectedSpine
         fields = [
@@ -54,12 +49,22 @@ class DetectedSpineSerializer(serializers.ModelSerializer):
             "y1",
             "x2",
             "y2",
+            "confidence",
             "crop",
+            "crop_url",
             "vlm_title",
             "vlm_author",
-            "vlm_raw_response",
         ]
         read_only_fields = fields
+
+    def get_crop_url(self, obj: DetectedSpine) -> str | None:
+        if not obj.crop:
+            return None
+        request = self.context.get("request")
+        url = obj.crop.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url
 
 
 class MatchResultSerializer(serializers.ModelSerializer):

@@ -6,15 +6,15 @@ This is a local-only take-home: Expo (React Native) client + Django REST API. No
 
 ## Status
 
-Phase 0 scaffolding only. The app and API boot, and the client can reach `GET /api/health/`. Spine detection, VLM reads, catalog matching, and library UI are not built yet.
+Local book detection is wired end-to-end: Expo can capture / pick / URL-submit a photo, Django runs Ultralytics YOLOv8n (COCO, CPU), and the app shows crop thumbnails + boxes. VLM reading, fuzzy matching, and review UI are not built yet.
 
 ## Stack (local vs hosted)
 
 | Piece | Where it runs |
 | --- | --- |
-| Spine detection (pretrained, CPU) | Local (not wired yet) |
+| Spine/book detection (YOLOv8n, COCO pretrained, CPU) | Local |
 | Title/author read from spine crops | Hosted VLM (not wired yet; provider TBD) |
-| Catalog match + library | Local SQLite (not wired yet) |
+| Catalog match + library | Local SQLite (catalog loaded; matching not wired yet) |
 
 ## Setup
 
@@ -30,15 +30,20 @@ python manage.py load_catalog
 python manage.py runserver 0.0.0.0:8000
 ```
 
-`load_catalog` upserts from repo-root `catalog.csv` (safe to re-run). Health check: `http://127.0.0.1:8000/api/health/` → `{"status":"ok","service":"shelfie"}`
+First detection download: Ultralytics fetches `yolov8n.pt` into `backend/models/` (gitignored).
 
-Also available:
-- `GET /api/catalog/` — all CatalogBook rows
-- `GET /api/library/` — confirmed library (empty until review flow exists)
-- `/admin/` — Django admin (create a local superuser with `python manage.py createsuperuser`)
+Smoke-test detection without the API:
 
+```powershell
+python manage.py detect_spines samples\bookshelf.jpg
+```
 
-`0.0.0.0` is required so a physical phone on the same LAN can reach the API. Simulators can use localhost / `10.0.2.2`.
+Endpoints:
+- `GET /api/health/`
+- `GET /api/catalog/`
+- `GET /api/library/`
+- `POST /api/detect/` — multipart `image` **or** JSON `{"url":"..."}` (original is not kept; crops are)
+- `/admin/` — `python manage.py createsuperuser`
 
 ### Mobile (Expo)
 
@@ -48,29 +53,26 @@ npm install
 npx expo start
 ```
 
-Then open in Expo Go, an iOS simulator, or an Android emulator.
-
-Default API URLs:
-
-- iOS simulator / Expo web: `http://127.0.0.1:8000`
-- Android emulator: `http://10.0.2.2:8000`
-
-On a **physical device**, localhost is the phone. Create `mobile/.env` (see `mobile/.env.example`) with your computer's LAN IP:
-
-```
-EXPO_PUBLIC_API_URL=http://192.168.x.x:8000
-```
-
-Restart Expo after changing `.env`.
+On a **physical device**, create `mobile/.env` from `.env.example` with your PC Wi‑Fi IP, then restart Expo.
 
 ## Catalog
 
-`catalog.csv` has ~130 books with deliberate ambiguities (duplicate editions, US/UK titles, shared titles, omnibus vs volumes, substring titles, author-name variants). Load into SQLite with `python manage.py load_catalog`.
+`catalog.csv` has ~130 books with deliberate ambiguities. Load with `python manage.py load_catalog`.
 
 ## Measured latency / cost
 
-Not applicable yet (no detection or VLM calls).
+Sample photo `samples/bookshelf.jpg` (management command, CPU, YOLOv8n):
+
+| Stage | Measured |
+| --- | --- |
+| Detection (first warm-ish run after weight download) | ~7.3 s |
+| Detection (subsequent API smoke test) | ~3.9 s |
+| Boxes / crops | 47 |
+
+VLM cost: not applicable yet.
+
+Honest caveat: COCO `book` is not a spine segmenter — one detection may cover a cluster of spines.
 
 ## What's unfinished
 
-Everything past scaffolding: detection, VLM, matching, review screen, library persistence, tests, photos, full README.
+VLM per-crop reads, fuzzy catalog matching, review screen, library confirm flow, matching tests, fuller README tradeoffs.
