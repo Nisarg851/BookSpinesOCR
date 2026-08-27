@@ -31,8 +31,10 @@ class PipelineResult:
 def _match_spines(photo: ShelfPhoto) -> int:
     """
     Run fuzzy matching for every spine; create MatchResult rows.
-    AUTO_ACCEPTED also creates a LibraryEntry (direct-add path).
-    Returns matching_ms.
+
+    AUTO_ACCEPTED marks a high-confidence suggestion only — LibraryEntry rows
+    are created when the user finalizes via confirm (accept), so they can still
+    undo on the review screen before anything is written to the library.
     """
     started = time.perf_counter()
     for spine in photo.spines.all():
@@ -69,20 +71,12 @@ def _match_spines(photo: ShelfPhoto) -> int:
                 catalog_book = None
                 confidence = decision.best.confidence if decision.best else 0.0
 
-        match = MatchResult.objects.create(
+        MatchResult.objects.create(
             spine=spine,
             catalog_book=catalog_book,
             confidence=confidence,
             status=match_status,
         )
-
-        if match_status == MatchResult.Status.AUTO_ACCEPTED:
-            LibraryEntry.objects.create(
-                title=catalog_book.title,
-                author=catalog_book.author,
-                catalog_book=catalog_book,
-                match_result=match,
-            )
 
     elapsed = int((time.perf_counter() - started) * 1000)
     photo.matching_ms = elapsed
