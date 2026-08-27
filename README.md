@@ -26,10 +26,11 @@ python -m venv .venv
 pip install -r backend\requirements.txt
 cd backend
 python manage.py migrate
+python manage.py load_catalog
 python manage.py runserver 0.0.0.0:8000
 ```
 
-Health check: `http://127.0.0.1:8000/api/health/` → `{"status":"ok","service":"shelfie"}`
+`load_catalog` upserts from repo-root `catalog.csv` (safe to re-run). Health check: `http://127.0.0.1:8000/api/health/` → `{"status":"ok","service":"shelfie"}`
 
 `0.0.0.0` is required so a physical phone on the same LAN can reach the API. Simulators can use localhost / `10.0.2.2`.
 
@@ -58,7 +59,7 @@ Restart Expo after changing `.env`.
 
 ## Catalog
 
-`catalog.csv` currently has only the header row. Rows and deliberate ambiguities come in a later phase.
+`catalog.csv` has ~130 books with deliberate ambiguities (duplicate editions, US/UK titles, shared titles, omnibus vs volumes, substring titles, author-name variants). Load into SQLite with `python manage.py load_catalog`.
 
 ## Measured latency / cost
 

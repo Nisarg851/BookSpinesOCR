@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 /**
  * Where the Django API lives for this device.
  *
- * Override with EXPO_PUBLIC_API_URL (see .env.example) when using a
+ * Override with EXPO_PUBLIC_API_URL in mobile/.env when using a
  * physical phone — localhost on the device is the phone, not your PC.
  */
 export function getApiBaseUrl(): string {

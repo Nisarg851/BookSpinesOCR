@@ -10,6 +10,7 @@ __pycache__/
 
 # Django
 backend/db.sqlite3
+backend/media/
 *.sqlite3
 
 # Secrets / local env

@@ -80,6 +80,10 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Uploaded shelf photos and spine crops (local only).
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Local Expo (web / simulator / device). Native fetch does not use CORS;
