@@ -104,6 +104,7 @@ class ShelfPhotoDetailSerializer(serializers.ModelSerializer):
 
 class LibraryEntrySerializer(serializers.ModelSerializer):
     catalog_book = CatalogBookSerializer(read_only=True)
+    crop_url = serializers.SerializerMethodField()
 
     class Meta:
         model = LibraryEntry
@@ -113,6 +114,17 @@ class LibraryEntrySerializer(serializers.ModelSerializer):
             "author",
             "catalog_book",
             "match_result",
+            "crop_url",
             "created_at",
         ]
         read_only_fields = fields
+
+    def get_crop_url(self, obj: LibraryEntry) -> str | None:
+        match = obj.match_result
+        if match is None or not getattr(match, "spine", None) or not match.spine.crop:
+            return None
+        request = self.context.get("request")
+        url = match.spine.crop.url
+        if request is not None:
+            return request.build_absolute_uri(url)
+        return url

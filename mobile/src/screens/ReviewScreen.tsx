@@ -20,7 +20,7 @@ import {
   filterCatalog,
   type ConfirmAction,
 } from "../confirm";
-import type { CaptureNav, ReviewRoute } from "../navigation";
+import type { ReviewNav, ReviewRoute } from "../navigation";
 import type { CatalogBook, DetectedSpine } from "../types";
 
 type SpineUiState =
@@ -60,7 +60,7 @@ function confidenceLabel(value: number): string {
 }
 
 export default function ReviewScreen() {
-  const navigation = useNavigation<CaptureNav>();
+  const navigation = useNavigation<ReviewNav>();
   const route = useRoute<ReviewRoute>();
   const { result, imageUri } = route.params;
   const spines = result.spines ?? [];
@@ -202,7 +202,7 @@ export default function ReviewScreen() {
           return;
         }
       }
-      navigation.navigate("Capture");
+      navigation.navigate("Library");
     } finally {
       setFinishing(false);
     }

@@ -35,7 +35,11 @@ class CatalogBookList(generics.ListAPIView):
 class LibraryEntryList(generics.ListAPIView):
     """Confirmed library for the single implicit user."""
 
-    queryset = LibraryEntry.objects.select_related("catalog_book").all()
+    queryset = LibraryEntry.objects.select_related(
+        "catalog_book",
+        "match_result",
+        "match_result__spine",
+    ).all()
     serializer_class = LibraryEntrySerializer
 
 
